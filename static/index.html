@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brain Service Voice Agent</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen p-8 flex items-center justify-center">
+    <div class="max-w-2xl w-full space-y-8">
+        <h1 class="text-4xl font-bold text-gray-800 text-center">Talk to Brain</h1>
+
+        <!-- Language Selector -->
+        <div class="flex justify-center">
+            <select id="languageSelect"
+                class="bg-white border border-gray-300 text-gray-700 py-2 px-4 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 font-medium">
+                <option value="English">English</option>
+                <option value="Hindi">Hindi (हिंदी)</option>
+                <option value="Bengali">Bengali (বাংলা)</option>
+                <option value="Tamil">Tamil (தமிழ்)</option>
+            </select>
+        </div>
+
+        <!-- Voice Agent Section -->
+        <div class="bg-white p-8 rounded-2xl shadow-xl border-t-8 border-red-500">
+            <div class="space-y-6">
+                <!-- Controls -->
+                <div class="flex justify-center space-x-6">
+                    <button id="startRecording"
+                        class="bg-red-600 text-white py-4 px-8 rounded-full hover:bg-red-700 transition flex items-center shadow-lg text-lg font-semibold transform hover:scale-105">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 mr-3" fill="none" viewBox="0 0 24 24"
+                            stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                        </svg>
+                        Start Talking
+                    </button>
+                    <button id="stopRecording"
+                        class="bg-gray-800 text-white py-4 px-8 rounded-full hover:bg-gray-900 transition flex items-center shadow-lg text-lg font-semibold transform hover:scale-105 hidden">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 mr-3" fill="none" viewBox="0 0 24 24"
+                            stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                        </svg>
+                        Stop & Send
+                    </button>
+                </div>
+
+                <!-- Status -->
+                <div id="status" class="text-center text-gray-500 italic text-lg font-medium h-8">Ready to listen...
+                </div>
+
+                <!-- Chat History -->
+                <div class="bg-gray-50 p-6 rounded-xl h-96 overflow-y-auto border border-gray-200 space-y-4 shadow-inner"
+                    id="chatHistory">
+                    <div class="text-center text-gray-400 mt-32">
+                        <p>Press "Start Talking" to begin.</p>
+                        <p class="text-xs mt-2">Make sure your microphone is allowed.</p>
+                    </div>
+                </div>
+
+                <!-- Visualization (Simple) -->
+                <div id="visualizer" class="h-2 bg-gray-200 rounded-full overflow-hidden hidden">
+                    <div id="volumeBar" class="h-full bg-red-500 w-0 transition-all duration-75"></div>
+                </div>
+
+                <!-- Debug Logs -->
+                <details class="text-xs text-gray-400">
+                    <summary class="cursor-pointer hover:text-gray-600">Debug Logs</summary>
+                    <pre id="debugLog"
+                        class="mt-2 p-2 bg-gray-800 text-green-400 rounded overflow-x-auto max-h-32"></pre>
+                </details>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "http://localhost:8000";
+        const startBtn = document.getElementById('startRecording');
+        const stopBtn = document.getElementById('stopRecording');
+        const statusEl = document.getElementById('status');
+        const chatHistory = document.getElementById('chatHistory');
+        const visualizer = document.getElementById('visualizer');
+        const volumeBar = document.getElementById('volumeBar');
+        const debugLog = document.getElementById('debugLog');
+        const languageSelect = document.getElementById('languageSelect');
+
+        let mediaRecorder;
+        let audioChunks = [];
+        let conversationHistory = [];
+        let audioContext;
+        let analyser;
+        let microphone;
+        let animationId;
+
+        const log = (msg) => {
+            const time = new Date().toLocaleTimeString();
+            debugLog.textContent += `[${time}] ${msg}\n`;
+            debugLog.scrollTop = debugLog.scrollHeight;
+            console.log(`[${time}] ${msg}`);
+        };
+
+        const addToHistory = (role, text) => {
+            // Clear placeholder if it exists
+            if (chatHistory.querySelector('.text-center')) {
+                chatHistory.innerHTML = '';
+            }
+            const div = document.createElement('div');
+            const isUser = role === 'user';
+            div.className = `flex w-full ${isUser ? 'justify-end' : 'justify-start'}`;
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = `p-4 rounded-2xl max-w-[85%] shadow-sm ${isUser
+                ? 'bg-blue-600 text-white rounded-br-none'
+                : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'
+                }`;
+            contentDiv.innerHTML = `<div class="text-xs mb-1 opacity-70 uppercase tracking-wide font-bold">${role}</div><div class="text-lg leading-relaxed">${text}</div>`;
+
+            div.appendChild(contentDiv);
+            chatHistory.appendChild(div);
+            div.scrollIntoView({ behavior: 'smooth' });
+        };
+
+        const speak = (text) => {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+
+            // Try to find a good voice based on selected language
+            const selectedLang = languageSelect.value;
+            const voices = window.speechSynthesis.getVoices();
+
+            let voiceLangCode = "en";
+            if (selectedLang === "Hindi") voiceLangCode = "hi";
+            if (selectedLang === "Bengali") voiceLangCode = "bn";
+            if (selectedLang === "Tamil") voiceLangCode = "ta";
+
+            const preferredVoice = voices.find(v => v.lang.startsWith(voiceLangCode)) ||
+                voices.find(v => v.name.includes("Google")) ||
+                voices[0];
+
+            if (preferredVoice) {
+                utterance.voice = preferredVoice;
+                utterance.lang = preferredVoice.lang;
+                log(`Using voice: ${preferredVoice.name} (${preferredVoice.lang})`);
+            }
+
+            statusEl.textContent = "Speaking...";
+            utterance.onend = () => {
+                statusEl.textContent = "Ready";
+                statusEl.classList.remove('text-blue-600');
+            };
+            window.speechSynthesis.speak(utterance);
+        };
+
+        const setupAudioContext = async (stream) => {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            microphone = audioContext.createMediaStreamSource(stream);
+            microphone.connect(analyser);
+            analyser.fftSize = 256;
+
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            const updateVolume = () => {
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for (let i = 0; i < bufferLength; i++) {
+                    sum += dataArray[i];
+                }
+                const average = sum / bufferLength;
+                const volume = Math.min(100, Math.max(0, average * 2)); // Scale up
+                volumeBar.style.width = `${volume}%`;
+                animationId = requestAnimationFrame(updateVolume);
+            };
+            updateVolume();
+        };
+
+        const processAudio = async (audioBlob) => {
+            log(`Processing audio blob size: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
+
+            if (audioBlob.size < 1000) {
+                statusEl.textContent = "Audio too short/empty.";
+                log("Error: Audio blob too small.");
+                return;
+            }
+
+            statusEl.textContent = "Transcribing...";
+            statusEl.classList.add('text-blue-600', 'animate-pulse');
+
+            const formData = new FormData();
+            // Send as webm, backend handles extension via filename or detection
+            formData.append('file', audioBlob, 'voice_input.webm');
+            formData.append('language', languageSelect.value);
+
+            try {
+                // 1. STT
+                log("Sending to /transcribe...");
+                const transRes = await fetch(`${API_URL}/transcribe`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!transRes.ok) throw new Error(`Transcribe failed: ${transRes.status}`);
+
+                const transData = await transRes.json();
+                log(`Transcription result: ${JSON.stringify(transData)}`);
+
+                if (!transData.text || transData.text.trim().length === 0) {
+                    statusEl.textContent = "No speech detected.";
+                    log("Warning: Empty transcription text.");
+                    statusEl.classList.remove('animate-pulse');
+                    return;
+                }
+
+                addToHistory('user', transData.text);
+
+                // 2. Classify (Parallel to Chat for speed)
+                log("Sending to /classify...");
+                const classifyPromise = fetch(`${API_URL}/classify`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: transData.text,
+                        labels: ["Waste Management", "Roads", "Street Lights", "Water Supply", "Other"]
+                    })
+                }).then(res => res.json());
+
+                // 3. Chat
+                statusEl.textContent = "Thinking...";
+                log("Sending to /chat...");
+                const chatRes = await fetch(`${API_URL}/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: transData.text,
+                        history: conversationHistory,
+                        language: languageSelect.value
+                    })
+                });
+
+                if (!chatRes.ok) throw new Error(`Chat failed: ${chatRes.status}`);
+                const chatData = await chatRes.json();
+
+                // Wait for classification to finish
+                const classifyData = await classifyPromise;
+                log(`Classification result: ${JSON.stringify(classifyData)}`);
+
+                statusEl.textContent = `Category: ${classifyData.top_label}`;
+                statusEl.classList.remove('text-blue-600');
+                statusEl.classList.add('text-green-600');
+
+                addToHistory('assistant', chatData.response);
+                conversationHistory.push({ role: 'user', content: transData.text });
+                conversationHistory.push({ role: 'assistant', content: chatData.response });
+
+                // 4. TTS
+                speak(chatData.response);
+
+            } catch (err) {
+                console.error(err);
+                statusEl.textContent = "Error: See logs";
+                log(`Error: ${err.message}`);
+                alert(`Error: ${err.message}`);
+            } finally {
+                statusEl.classList.remove('animate-pulse');
+            }
+        };
+
+        startBtn.addEventListener('click', async () => {
+            log("Requesting microphone access...");
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                log("Microphone access granted.");
+
+                setupAudioContext(stream);
+
+                // Important: mimetype must correspond to what browser supports and backend accepts
+                // Chrome supports audio/webm;codecs=opus usually
+                const options = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                    ? { mimeType: 'audio/webm;codecs=opus' }
+                    : undefined;
+
+                mediaRecorder = new MediaRecorder(stream, options);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = () => {
+                    log("Recording stopped. Creating blob...");
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    processAudio(audioBlob);
+
+                    // Cleanup visualizer
+                    cancelAnimationFrame(animationId);
+                    volumeBar.style.width = '0%';
+
+                    // Stop tracks to release mic
+                    stream.getTracks().forEach(track => track.stop());
+                };
+
+                mediaRecorder.start();
+                log("MediaRecorder started.");
+
+                startBtn.classList.add('hidden');
+                stopBtn.classList.remove('hidden');
+                visualizer.classList.remove('hidden');
+
+                statusEl.textContent = "Listening...";
+                statusEl.classList.add('text-red-600', 'animate-pulse');
+
+            } catch (err) {
+                log(`Microphone error: ${err.message}`);
+                alert("Microphone access denied or error: " + err.message);
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                startBtn.classList.remove('hidden');
+                stopBtn.classList.add('hidden');
+                visualizer.classList.add('hidden');
+
+                statusEl.classList.remove('text-red-600', 'animate-pulse');
+                statusEl.textContent = "Processing...";
+            }
+        });
+    </script>
+</body>
+
+</html>
