@@ -1,4 +1,3 @@
-
 # Brain Service
 
 A production-ready FastAPI microservice for processing civic complaints.
@@ -67,4 +66,3 @@ curl -X POST -H "Content-Type: application/json" -d '{
 ## Agent Roles
 - **Listener Agent**: Handles the "hearing" part of the service. It transcribes audio files into text using a local Whisper model.
 - **Brain Agent**: Handles the "reasoning" part. Specially prompted to act as a classifier and data extractor, ensuring predictable JSON outputs for downstream services.
-
