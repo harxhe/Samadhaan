@@ -1,17 +1,51 @@
 const { createClient } = require("@supabase/supabase-js");
+const path = require("path");
+const dotenv = require("dotenv");
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
-if (!supabaseUrl || !supabaseKey) {
-  console.warn("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment variables.");
+const supabaseUrl = process.env.SUPABASE_URL?.trim();
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+
+if (!supabaseUrl) {
+  throw new Error("Missing SUPABASE_URL environment variable");
 }
 
-const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
-});
+if (!supabaseServiceRoleKey) {
+  throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY environment variable");
+}
 
-module.exports = { supabaseAdmin };
+const clientOptions = {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+  },
+};
+
+const supabaseAdmin = createClient(
+  supabaseUrl,
+  supabaseServiceRoleKey,
+  clientOptions
+);
+
+const testConnection = async () => {
+  try {
+    const { error } = await supabaseAdmin
+      .from("complaints")
+      .select("id")
+      .limit(1);
+
+    if (error) {
+      throw error;
+    }
+
+    return true;
+  } catch (_error) {
+    return false;
+  }
+};
+
+module.exports = {
+  supabaseAdmin,
+  testConnection,
+};
